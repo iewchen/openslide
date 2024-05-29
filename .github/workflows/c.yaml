@@ -2,7 +2,7 @@ name: C
 
 on:
   push:
-    branches: [main]
+    branches: [czijxr2]
     tags: ["*"]
   pull_request:
     branches: [main]
