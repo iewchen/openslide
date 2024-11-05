@@ -76,4 +76,48 @@ void _openslide_restore_czi_zstd1_sse3(uint8_t *src, size_t src_len,
   }
 }
 
+void _openslide_gray16_to_gray8_sse2(uint8_t *src, size_t src_len,
+                                     int pixel_real_bits, uint8_t *dst) {
+  /* eight 16-bits pixels a time */
+  int nshift = pixel_real_bits - 8;
+  const int mm_step = 16;
+  /* Decrease mm_len by 1 so that the last write is still 16 bytes inside
+   * dst buffer.
+   */
+  size_t mm_len = src_len / mm_step - 1;
+  __m128i gray8, gray16, tmp1, tmp2;
+  __m128i hi8 =
+      _mm_setr_epi8(1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
+  __m128i lo8 =
+      _mm_setr_epi8(0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+  __m128i allzero = _mm_set_epi64x(0, 0);
+
+  for (size_t n = 0; n < mm_len; n++) {
+    gray16 = _mm_load_si128((__m128i const *)src);
+    tmp2 = _mm_srli_epi16(gray16, nshift);
+    gray8 = _mm_shuffle_epi8(tmp2, lo8);
+    /* check after right shift, whether the high 8 bits are non-zero. Sometimes
+     * 14 bits zeiss gray uses more than 14 bits.
+     */
+    tmp1 = _mm_shuffle_epi8(tmp2, hi8);
+    /* 0xFF if high 8 bits is non-zero, 0 otherwise. The sign bit of high 8
+     * bits is always zero since it has been shift right, therefor it is safe to
+     * compare signed with 0.
+     */
+    tmp2 = _mm_cmpgt_epi8(tmp1, allzero);
+    tmp1 = _mm_or_si128(tmp2, gray8);
+    _mm_storeu_si128((__m128i *)dst, tmp1);
+
+    src += mm_step;
+    dst += 8;
+  }
+
+  size_t i = mm_len * mm_step;
+  while (i < src_len) {
+    *dst++ = gray16togray8(src, nshift);
+    i += 2;
+    src += 2;
+  }
+}
+
 #endif

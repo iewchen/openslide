@@ -201,6 +201,14 @@ void openslide_read_region(openslide_t *osr,
 			   int32_t level,
 			   int64_t w, int64_t h);
 
+OPENSLIDE_PUBLIC()
+void openslide_read_region_gray8(openslide_t *osr, uint8_t *dest, int64_t x,
+                                 int64_t y, int32_t level, int64_t w,
+                                 int64_t h);
+OPENSLIDE_PUBLIC()
+void openslide_read_region_gray16(openslide_t *osr, uint8_t *dest, int64_t x,
+                                  int64_t y, int32_t level, int64_t w,
+                                  int64_t h);
 
 /**
  * Get the size in bytes of the ICC color profile for the whole slide image.

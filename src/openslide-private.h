@@ -64,7 +64,14 @@ struct _openslide {
   const struct _openslide_ops *ops;
   struct _openslide_level **levels;
   void *data;
+  // only count the levels in the first channel
   int32_t level_count;
+
+  // on multi-channel image, every channel has its own levels. They are stored
+  // in osr->levels array as [levels of 1st channel, levels of 2nd channel,
+  // ...]. level_count_all is the length of osr->levels array.
+  int32_t level_count_all;
+  int32_t channel_count;
 
   // associated images
   GHashTable *associated_images;  // created automatically
@@ -409,5 +416,7 @@ extern const int16_t _openslide_B_Cb[256];
 // Prevent windows.h from defining the IN/OUT macro
 #define _NO_W32_PSEUDO_MODIFIERS
 #endif
+
+extern const cairo_user_data_key_t _openslide_cairo_key;
 
 #endif

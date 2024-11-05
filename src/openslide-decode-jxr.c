@@ -78,7 +78,7 @@ static guint get_bits_per_pixel(const PKPixelFormatGUID *pixel_format) {
   return pixel_info.cbitUnit;
 }
 
-bool _openslide_jxr_decode_buf(const void *src, int64_t src_len, uint32_t *dst,
+bool _openslide_jxr_decode_buf(const void *src, int64_t src_len, uint8_t *dst,
                                int64_t dst_len, GError **err) {
   struct WMPStream *pStream = NULL;
   PKImageDecode *pDecoder = NULL;
@@ -86,7 +86,6 @@ bool _openslide_jxr_decode_buf(const void *src, int64_t src_len, uint32_t *dst,
   ERR jerr;
   PKPixelFormatGUID fmt;
   PKRect rect = {0, 0, 0, 0};
-  g_autofree uint8_t *unjxr = NULL;
 
   CreateWS_Memory(&pStream, (void *) src, src_len);
   // IID_PKImageWmpDecode is the only supported decoder PKIID
@@ -102,49 +101,33 @@ bool _openslide_jxr_decode_buf(const void *src, int64_t src_len, uint32_t *dst,
   }
 
   pDecoder->GetSize(pDecoder, &rect.Width, &rect.Height);
-  int64_t out_len = rect.Width * rect.Height * 4;
-  // JXR tile size may be incorrect in czi directory entries
-  g_assert(out_len <= dst_len);
-
   pDecoder->GetPixelFormat(pDecoder, &fmt);
   PKPixelFormatGUID fmt_out;
-  void (*convert)(uint8_t *, size_t, uint32_t *);
   if (IsEqualGUID(&fmt, &GUID_PKPixelFormat24bppBGR)) {
     fmt_out = GUID_PKPixelFormat24bppBGR;
-    convert = _openslide_bgr24_to_argb32;
   } else if (IsEqualGUID(&fmt, &GUID_PKPixelFormat48bppRGB)) {
     /* Although the format called 48bppRGB in JXR, its color order is BGR for
      * czi. Use 48bppRGB as it is and prefer openslide function for converting
      * to argb32.
      */
     fmt_out = GUID_PKPixelFormat48bppRGB;
-    convert = _openslide_bgr48_to_argb32;
   } else if (IsEqualGUID(&fmt, &GUID_PKPixelFormat8bppGray)) {
-    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "GUID_PKPixelFormat8bppGray is not supported");
-    goto Cleanup;
+    fmt_out = GUID_PKPixelFormat8bppGray;
   } else if (IsEqualGUID(&fmt, &GUID_PKPixelFormat16bppGray)) {
-    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "GUID_PKPixelFormat16bppGray is not supported");
-    goto Cleanup;
+    fmt_out = GUID_PKPixelFormat16bppGray;
   } else {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "Currently only support GUID_PKPixelFormat24bppBGR and "
-                "GUID_PKPixelFormat48bppRGB");
+                "Currently only support "
+                "GUID_PKPixelFormat24bppBGR, GUID_PKPixelFormat48bppRGB, "
+                "GUID_PKPixelFormat8bppGray and GUID_PKPixelFormat16bppGray");
     goto Cleanup;
   }
 
-  uint32_t stride =
-      rect.Width *
+  uint32_t stride = rect.Width *
       ((MAX(get_bits_per_pixel(&fmt), get_bits_per_pixel(&fmt_out)) + 7) / 8);
-  int64_t unjxr_len = stride * rect.Height;
-  unjxr = g_try_malloc(unjxr_len);
-  if (!unjxr) {
-    g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
-                "Couldn't allocate %" PRId64 " bytes for decoding JXR",
-                unjxr_len);
-    return false;
-  }
+  int64_t unjxr_len = rect.Height * stride;
+  // JXR tile size may be incorrect in czi directory entries
+  g_assert(unjxr_len <= dst_len);
 
   // Create color converter
   jerr = PKCodecFactory_CreateFormatConverter(&pConverter);
@@ -157,12 +140,10 @@ bool _openslide_jxr_decode_buf(const void *src, int64_t src_len, uint32_t *dst,
     goto Cleanup;
   }
 
-  jerr = pConverter->Copy(pConverter, &rect, unjxr, stride);
+  jerr = pConverter->Copy(pConverter, &rect, dst, stride);
   if (jerr < 0) {
     goto Cleanup;
   }
-
-  convert(unjxr, unjxr_len, dst);
 
 Cleanup:
   print_err(jerr, err);

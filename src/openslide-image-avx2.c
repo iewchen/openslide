@@ -80,4 +80,51 @@ void _openslide_restore_czi_zstd1_avx2(uint8_t *src, size_t src_len,
   }
 }
 
+void _openslide_gray16_to_gray8_avx2(uint8_t *src, size_t src_len,
+                                     int pixel_real_bits, uint8_t *dst) {
+  /* sixteen 16-bits pixels a time */
+  int nshift = pixel_real_bits - 8;
+  const int mm_step = 32;
+  /* Decrease mm_len by 1 so that the last write is still 16 bytes inside
+   * dst buffer.
+   */
+  size_t mm_len = src_len / mm_step - 1;
+  __m256i gray8, tmp1, tmp2;
+  __m256i hi8 = _mm256_setr_epi8(
+      1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1,
+      1, 3, 5, 7, 9, 11, 13, 15, -1, -1, -1, -1, -1, -1, -1, -1);
+  __m256i lo8 = _mm256_setr_epi8(
+      0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1,
+      0, 2, 4, 6, 8, 10, 12, 14, -1, -1, -1, -1, -1, -1, -1, -1);
+  __m256i allzero = _mm256_set_epi64x(0, 0, 0, 0);
+  for (size_t n = 0; n < mm_len; n++) {
+    tmp1 = _mm256_lddqu_si256((__m256i const *)src); // gray16
+    tmp2 = _mm256_srli_epi16(tmp1, nshift);          // right shift
+    gray8 = _mm256_shuffle_epi8(tmp2, lo8);          // bits 0-7 of gray16
+
+    /* check after right shift, whether the high 8 bits are non-zero. Sometimes
+     * 14 bits zeiss gray uses more than 14 bits.
+     */
+    tmp1 = _mm256_shuffle_epi8(tmp2, hi8);           // bits 8-15 of gray16
+    /* 0xFF if high 8 bits is non-zero, 0 otherwise. The sign bit of high 8
+     * bits is always zero since it has been shift right, therefor it is safe to
+     * compare signed with 0.
+     */
+    tmp2 = _mm256_cmpgt_epi8(tmp1, allzero);
+    tmp1 = _mm256_or_si256(tmp2, gray8);
+    tmp2 = _mm256_permute4x64_epi64(tmp1, 0x08);
+    _mm256_storeu_si256((__m256i *)dst, tmp2);
+
+    src += mm_step;
+    dst += 16;
+  }
+
+  size_t i = mm_len * mm_step;
+  while (i < src_len) {
+    *dst++ = gray16togray8(src, nshift);
+    i += 2;
+    src += 2;
+  }
+}
+
 #endif
