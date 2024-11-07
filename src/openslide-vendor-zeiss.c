@@ -248,8 +248,13 @@ struct czi_subblk {
   int32_t pixel_type;
   int32_t compression;
   int32_t dir_entry_len;
-  // higher z-index overlaps a lower z-index
-  int32_t x, y, z;
+  // for tiles in the same Z plane. Higher m-index overlaps a lower m-index
+  int32_t m;
+  int32_t x, y;
+  // Z index
+  int32_t z;
+  // time point index
+  int32_t t;
   uint32_t w, h;
   int8_t scene;
   int8_t ch;
@@ -292,6 +297,7 @@ struct level {
   int64_t downsample_i;
   uint32_t max_tile_w;
   uint32_t max_tile_h;
+  int32_t t, z;  // timepoint and z-stack
   int8_t ch;
 };
 
@@ -761,14 +767,21 @@ static bool read_dim_entry(struct czi_subblk *sb, char **p, size_t *avail,
     sb->ch = start;
   } else if (g_str_equal(name, "M")) {
     // mosaic tile index in drawing stack; highest number is frontmost
+    sb->m = start;
+  } else if (g_str_equal(name, "Z")) {
+    // Z z-stack index
     sb->z = start;
+  } else if (g_str_equal(name, "T")) {
+    // T Time point in a sequentially acquired series of data
+    sb->t = start;
   } else if (g_str_equal(name, "B")) {
-    // nothing to do
     // Block index in segmented experiments. Not sure its meaning. It has
     // been dropped. Ignore B dimension enables OpenSlide read old CZI files.
-    //
+    // ignore
   } else if (g_str_equal(name, "H")) {
-    // Ignore H TODO ignore more unknown dimensions
+    // phase index, most fluorescence image has it. ignore
+  } else if (g_str_equal(name, "V")) {
+    // V view index. ignore
   } else {
     g_set_error(err, OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
                 "Unrecognized subblock dimension \"%s\"", name);
@@ -831,6 +844,8 @@ static bool read_dir_entry(struct czi_subblk *sb, char **p, size_t *avail,
   sb->compression = GINT32_FROM_LE(dv->compression);
   sb->file_pos = GINT64_FROM_LE(dv->file_pos);
   sb->ch = 0;  // set default channel in case slide does not have C dimension
+  sb->t = 0;   // set default timepoint in case slide does not have T dimension
+  sb->z = 0;   // set default z-stack in case slide does not have Z dimension
   int32_t ndim = GINT32_FROM_LE(dv->ndimensions);
 
   for (int i = 0; i < ndim; i++) {
@@ -1389,41 +1404,58 @@ static int compare_level_downsamples(const void *la, const void *lb) {
   const struct level *a = *(const struct level **) la;
   const struct level *b = *(const struct level **) lb;
 
-  if (a->ch < b->ch) {
+  // order by z-stack, then by timepoint, then by channel, then by downsample
+  if (a->z < b->z) {
+    return -1;
+  } else if (a->z > b->z) {
+    return 1;
+  } else if (a->t < b->t) {
+    return -1;
+  } else if (a->t > b->t) {
+    return 1;
+  } else if (a->ch < b->ch) {
     return -1;
   } else if (a->ch > b->ch) {
     return 1;
-  }
-
-  // a->channel == b->channel
-  if (a->downsample_i == b->downsample_i) {
+  } else if (a->downsample_i < b->downsample_i) {
+    return -1;
+  } else if (a->downsample_i > b->downsample_i) {
+    return 1;
+  } else {
     return 0;
   }
-
-  return (a->downsample_i < b->downsample_i) ? -1 : 1;
 }
 
-static guint czi_level_hash (gconstpointer v) {
+static guint czi_level_hash(gconstpointer v) {
   const struct czi_subblk *a = (const struct czi_subblk *) v;
-  return (guint) (a->ch + 1) * a->downsample_i;
+  return (guint) a->z << 24 | a->t << 16 | a->ch << 8 | a->downsample_i;
 }
 
-static int czi_level_equal (gconstpointer v1, gconstpointer v2) {
+static int czi_level_equal(gconstpointer v1, gconstpointer v2) {
   const struct czi_subblk *a = (const struct czi_subblk *) v1;
   const struct czi_subblk *b = (const struct czi_subblk *) v2;
-  return (a->ch == b->ch) && (a->downsample_i == b->downsample_i);
+  return (a->z == b->z) && (a->t == b->t) && (a->ch == b->ch) &&
+         (a->downsample_i == b->downsample_i);
 }
 
 /* count number of channels and levels in one channel */
-static void count_level_channel(GPtrArray *levels,
-                                int32_t *nch, int32_t *nlevel) {
+static void count_level_channel(GPtrArray *levels, int32_t *nch,
+                                int32_t *nlevel, int32_t *nzstack,
+                                int32_t *ntimepoint) {
   struct level *l = levels->pdata[0];
   int8_t ch0 = l->ch;
   int8_t ch = ch0;
+  int32_t z0 = l->z;
+  int32_t t0 = l->t;
+
   *nlevel = 0;
   *nch = 1;
   for (unsigned i = 0; i < levels->len; i++) {
     l = levels->pdata[i];
+    if (l->z != z0 || l->t != t0) {
+      continue;
+    }
+
     if (l->ch == ch0) {
       *nlevel += 1;
     }
@@ -1433,8 +1465,29 @@ static void count_level_channel(GPtrArray *levels,
       ch = l->ch;
     }
   }
-}
 
+  *ntimepoint = 1;
+  for (unsigned i = 0; i < levels->len; i++) {
+    l = levels->pdata[i];
+    if (l->z != z0) {
+      break;
+    }
+
+    if (l->t != t0) {
+      *ntimepoint += 1;
+      t0 = l->t;
+    }
+  }
+
+  *nzstack = 1;
+  for (unsigned i = 0; i < levels->len; i++) {
+    l = levels->pdata[i];
+    if (l->z != z0) {
+      *nzstack += 1;
+      z0 = l->z;
+    }
+  }
+}
 
 static GPtrArray *create_levels(openslide_t *osr, struct czi *czi,
                                 int64_t max_downsample,
@@ -1462,6 +1515,8 @@ static GPtrArray *create_levels(openslide_t *osr, struct czi *czi,
       l->base.h = czi->h / l->base.downsample;
       l->downsample_i = b->downsample_i;
       l->ch = b->ch;
+      l->t = b->t;
+      l->z = b->z;
 
       g_ptr_array_add(levels, l);
       //int64_t *k = g_new(int64_t, 1);
@@ -1517,7 +1572,7 @@ static GPtrArray *create_levels(openslide_t *osr, struct czi *czi,
     _openslide_grid_range_add_tile(l->grid,
                                    (double) b->x / b->downsample_i,
                                    (double) b->y / b->downsample_i,
-                                   (double) b->z,
+                                   (double) b->m,
                                    (double) b->w, (double) b->h, b);
   }
 
@@ -1698,7 +1753,8 @@ static bool zeiss_open(openslide_t *osr, const char *filename,
   g_assert(osr->data == NULL);
   g_assert(osr->levels == NULL);
   g_assert(osr->cache == NULL);
-  count_level_channel(levels, &(osr->channel_count), &(osr->level_count));
+  count_level_channel(levels, &(osr->channel_count), &(osr->level_count),
+                      &(osr->zstack_count), &(osr->timepoint_count));
   osr->level_count_all = levels->len;
   osr->levels = (struct _openslide_level **)
     g_ptr_array_free(g_steal_pointer(&levels), false);

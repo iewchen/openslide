@@ -115,6 +115,14 @@ openslide_t *openslide_open(const char *filename);
 OPENSLIDE_PUBLIC()
 int32_t openslide_get_level_count(openslide_t *osr);
 
+OPENSLIDE_PUBLIC()
+int32_t openslide_get_channel_count(openslide_t *osr);
+
+OPENSLIDE_PUBLIC()
+int32_t openslide_get_timepoint_count(openslide_t *osr);
+
+OPENSLIDE_PUBLIC()
+int32_t openslide_get_zstack_count(openslide_t *osr);
 
 /**
  * Get the dimensions of level 0 (the largest level). Exactly

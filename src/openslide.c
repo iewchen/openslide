@@ -421,6 +421,33 @@ int32_t openslide_get_level_count(openslide_t *osr) {
 }
 
 
+int32_t openslide_get_channel_count(openslide_t *osr) {
+  if (openslide_get_error(osr)) {
+    return -1;
+  }
+
+  return osr->channel_count;
+}
+
+
+int32_t openslide_get_timepoint_count(openslide_t *osr) {
+  if (openslide_get_error(osr)) {
+    return -1;
+  }
+
+  return osr->timepoint_count;
+}
+
+
+int32_t openslide_get_zstack_count(openslide_t *osr) {
+  if (openslide_get_error(osr)) {
+    return -1;
+  }
+
+  return osr->zstack_count;
+}
+
+
 int32_t openslide_get_best_level_for_downsample(openslide_t *osr,
 						double downsample) {
   if (openslide_get_error(osr)) {
@@ -611,6 +638,14 @@ static bool read_region_area_gray(openslide_t *osr, uint8_t *dest,
   // as opaque, therefor has alpha 1. With SATURATE operator, it essentially
   // only show the all zeros destination.
   //cairo_set_operator(cr, CAIRO_OPERATOR_SATURATE);
+
+  if (level > osr->level_count_all - 1) {
+    GError *tmp_err = g_error_new(OPENSLIDE_ERROR, OPENSLIDE_ERROR_FAILED,
+                                  "invalid level %d", level);
+    _openslide_propagate_error(osr, tmp_err);
+    return false;
+  }
+
   struct _openslide_level *l = osr->levels[level];
 
   // offset if given negative coordinates

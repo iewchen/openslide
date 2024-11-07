@@ -72,6 +72,8 @@ struct _openslide {
   // ...]. level_count_all is the length of osr->levels array.
   int32_t level_count_all;
   int32_t channel_count;
+  int32_t zstack_count;
+  int32_t timepoint_count;
 
   // associated images
   GHashTable *associated_images;  // created automatically
@@ -283,7 +285,7 @@ struct _openslide_grid *_openslide_grid_create_range(openslide_t *osr,
                                                      GDestroyNotify destroy_tile);
 
 void _openslide_grid_range_add_tile(struct _openslide_grid *_grid,
-                                    double x, double y, double z,
+                                    double x, double y, double m,
                                     double w, double h,
                                     void *data);
 

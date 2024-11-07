@@ -154,7 +154,7 @@ struct range_tile {
 
   double x;
   double y;
-  double z;  // higher z-index is drawn later
+  double m;  // higher m-index is drawn later
   double w;
   double h;
 };
@@ -634,9 +634,9 @@ static int range_compare_tiles(gconstpointer a, gconstpointer b) {
   const struct range_tile *c_a = a;
   const struct range_tile *c_b = b;
 
-  if (c_a->z < c_b->z) {
+  if (c_a->m < c_b->m) {
     return -1;
-  } else if (c_a->z > c_b->z) {
+  } else if (c_a->m > c_b->m) {
     return 1;
   } else if (c_a->y < c_b->y) {
     return 1;
@@ -730,7 +730,7 @@ static bool range_paint_region(struct _openslide_grid *_grid,
     prev_tile = tile;
 
     // draw
-    //g_debug("tile x %g y %g z %g", tile->x, tile->y, tile->z);
+    //g_debug("tile x %g y %g m %g", tile->x, tile->y, tile->m);
     cairo_translate(cr, tile->x - x, tile->y - y);
     if (!grid->read_tile(grid->base.osr, cr, level,
                          tile->id, tile->data,
@@ -775,7 +775,7 @@ static const struct grid_ops range_grid_ops = {
 };
 
 void _openslide_grid_range_add_tile(struct _openslide_grid *_grid,
-                                    double x, double y, double z,
+                                    double x, double y, double m,
                                     double w, double h,
                                     void *data) {
   struct range_grid *grid = (struct range_grid *) _grid;
@@ -787,7 +787,7 @@ void _openslide_grid_range_add_tile(struct _openslide_grid *_grid,
   tile->data = data;
   tile->x = x;
   tile->y = y;
-  tile->z = z;
+  tile->m = m;
   tile->w = w;
   tile->h = h;
   g_ptr_array_add(grid->tiles, tile);
